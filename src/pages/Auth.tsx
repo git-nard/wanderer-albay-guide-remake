@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Plane, Lock, Eye, EyeOff } from "lucide-react";
+import { Plane, Lock, Eye, EyeOff, Phone } from "lucide-react";
 import { z } from "zod";
 
 const emailSchema = z.string().email("Invalid email address");
@@ -17,7 +17,7 @@ const nameSchema = z
   .string()
   .min(2, "Name must be at least 2 characters")
   .regex(/^[A-Za-z\s]+$/, "Full name can only contain letters and spaces");
-
+const phoneSchema = z.string().regex(/^\+63[0-9]{10}$/, "Phone must be in format +63XXXXXXXXXX");
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -34,9 +34,11 @@ const Auth = () => {
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
   const [signupName, setSignupName] = useState("");
-  
 
-  
+  // Phone OTP fields
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +80,7 @@ const Auth = () => {
       emailSchema.parse(signupEmail);
       passwordSchema.parse(signupPassword);
       nameSchema.parse(signupName);
+
       if (signupPassword !== signupConfirmPassword) {
         toast.error("Passwords do not match");
         return;
@@ -91,13 +94,14 @@ const Auth = () => {
 
     setIsLoading(true);
 
-    const redirectUrl = `${window.location.origin}/`;
     const { error } = await supabase.auth.signUp({
       email: signupEmail,
       password: signupPassword,
       options: {
-        emailRedirectTo: redirectUrl,
-        data: { full_name: signupName },
+        emailRedirectTo: `${window.location.origin}/`,
+        data: {
+          full_name: signupName,
+        },
       },
     });
 
@@ -106,13 +110,64 @@ const Auth = () => {
     if (error) {
       toast.error(error.message);
     } else {
-      toast.success("Check your email to confirm your account.");
-      navigate("/");
+      toast.success("Account created! Please verify your email to continue.");
+      navigate("/verify-email");
     }
   };
 
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
 
+    try {
+      phoneSchema.parse(phoneNumber);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        toast.error(error.errors[0].message);
+        return;
+      }
+    }
 
+    setIsLoading(true);
+
+    const { error } = await supabase.auth.signInWithOtp({
+      phone: phoneNumber,
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("OTP sent to your phone!");
+      setOtpSent(true);
+    }
+  };
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (otpCode.length !== 6) {
+      toast.error("Please enter a 6-digit OTP code");
+      return;
+    }
+
+    setIsLoading(true);
+
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone: phoneNumber,
+      token: otpCode,
+      type: 'sms',
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      toast.error(error.message);
+    } else if (data.user) {
+      toast.success("Welcome to Wanderer!");
+      navigate("/");
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10 p-4">
@@ -138,8 +193,9 @@ const Auth = () => {
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="login" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
+              <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="login">Login</TabsTrigger>
+                <TabsTrigger value="phone">Phone</TabsTrigger>
                 <TabsTrigger value="signup">Sign Up</TabsTrigger>
               </TabsList>
 
@@ -216,6 +272,79 @@ const Auth = () => {
                 </form>
               </TabsContent>
 
+              {/* PHONE OTP TAB */}
+              <TabsContent value="phone">
+                {!otpSent ? (
+                  <form onSubmit={handleSendOtp} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="phone-number">Phone Number</Label>
+                      <Input
+                        id="phone-number"
+                        type="tel"
+                        placeholder="+639123456789"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Format: +63XXXXXXXXXX (Philippine mobile number)
+                      </p>
+                    </div>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Phone className="mr-2 h-4 w-4 animate-spin" />
+                          Sending OTP...
+                        </>
+                      ) : (
+                        <>
+                          <Phone className="mr-2 h-4 w-4" />
+                          Send OTP
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyOtp} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="otp-code">Enter 6-Digit OTP</Label>
+                      <Input
+                        id="otp-code"
+                        type="text"
+                        placeholder="123456"
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        OTP sent to {phoneNumber}
+                      </p>
+                    </div>
+                    <Button type="submit" className="w-full" disabled={isLoading}>
+                      {isLoading ? (
+                        <>
+                          <Lock className="mr-2 h-4 w-4 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        "Verify OTP"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        setOtpSent(false);
+                        setOtpCode("");
+                      }}
+                    >
+                      Change Phone Number
+                    </Button>
+                  </form>
+                )}
+              </TabsContent>
 
               {/* SIGNUP TAB */}
               <TabsContent value="signup">
