@@ -32,8 +32,10 @@ interface TouristSpot {
   location: string;
   municipality: string | null;
   category: string[];
+  spot_type: string[]; // required now
   contact_number: string | null;
   image_url: string | null;
+  is_hidden_gem?: boolean;
 }
 
 interface Municipality {
@@ -62,10 +64,14 @@ const ManageSpots = () => {
     contact_number: "",
     image_url: "",
     categories: [] as string[],
+    spot_type: [] as string[], // new field
     is_hidden_gem: false,
   });
 
   const availableCategories = ["Nature", "Culture", "Adventure", "Food", "Beach", "Heritage"];
+  const availableSpotTypes = ["Camping", "Scenic", "Hiking", "Relaxation", "Island Hopping", "zipline",
+                              "Wildlife", "Museum", "Night Market", 
+  ];
 
   useEffect(() => {
     fetchSpots();
@@ -73,15 +79,16 @@ const ManageSpots = () => {
   }, []);
 
   const fetchSpots = async () => {
-    const { data, error } = await supabase
-      .from("tourist_spots")
-      .select("*")
-      .order("name");
-
-    if (!error && data) setSpots(data);
+    const { data, error } = await supabase.from("tourist_spots").select("*").order("name");
+    if (!error && data) {
+      const spotsWithType = data.map((spot: any) => ({
+        ...spot,
+        spot_type: spot.spot_type || [], // ensure always an array
+      }));
+      setSpots(spotsWithType);
+    }
   };
 
-  /** ✅ Fetch both municipalities and component cities for Albay */
   const fetchMunicipalities = async () => {
     try {
       const [muniRes, cityRes] = await Promise.all([
@@ -89,11 +96,7 @@ const ManageSpots = () => {
         fetch("https://psgc.gitlab.io/api/provinces/050500000/cities/"),
       ]);
 
-      const [muniData, cityData] = await Promise.all([
-        muniRes.json(),
-        cityRes.json(),
-      ]);
-
+      const [muniData, cityData] = await Promise.all([muniRes.json(), cityRes.json()]);
       const merged = [...(muniData || []), ...(cityData || [])];
 
       if (Array.isArray(merged)) {
@@ -110,13 +113,10 @@ const ManageSpots = () => {
     }
   };
 
-  /** ✅ Fetch barangays for both municipality & city codes */
   const fetchBarangays = async (code: string) => {
     try {
       let response = await fetch(`https://psgc.gitlab.io/api/municipalities/${code}/barangays/`);
-      if (!response.ok) {
-        response = await fetch(`https://psgc.gitlab.io/api/cities/${code}/barangays/`);
-      }
+      if (!response.ok) response = await fetch(`https://psgc.gitlab.io/api/cities/${code}/barangays/`);
       const data = await response.json();
 
       if (Array.isArray(data)) {
@@ -144,6 +144,24 @@ const ManageSpots = () => {
     if (code) fetchBarangays(code);
   };
 
+  const toggleCategory = (category: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      categories: prev.categories.includes(category)
+        ? prev.categories.filter((c) => c !== category)
+        : [...prev.categories, category],
+    }));
+  };
+
+  const toggleSpotType = (type: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      spot_type: prev.spot_type.includes(type)
+        ? prev.spot_type.filter((t) => t !== type)
+        : [...prev.spot_type, type],
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -153,9 +171,10 @@ const ManageSpots = () => {
       description: formData.description || null,
       location: formData.location,
       municipality: formData.municipality || null,
+      category: formData.categories,
+      spot_type: formData.spot_type,
       contact_number: formData.contact_number || null,
       image_url: formData.image_url || null,
-      category: formData.categories,
       is_hidden_gem: formData.is_hidden_gem,
     };
 
@@ -173,28 +192,17 @@ const ManageSpots = () => {
     setIsLoading(false);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this tourist spot?")) return;
-
-    const { error } = await supabase.from("tourist_spots").delete().eq("id", id);
-
-    if (error) toast.error("Failed to delete spot");
-    else {
-      toast.success("Spot deleted successfully");
-      fetchSpots();
-    }
-  };
-
-  const handleEdit = (spot: any) => {
+  const handleEdit = (spot: TouristSpot) => {
     setEditingSpot(spot);
     setFormData({
       name: spot.name,
       description: spot.description || "",
       location: spot.location,
       municipality: spot.municipality || "",
+      categories: spot.category,
+      spot_type: spot.spot_type || [],
       contact_number: spot.contact_number || "",
       image_url: spot.image_url || "",
-      categories: spot.category,
       is_hidden_gem: spot.is_hidden_gem || false,
     });
     setIsDialogOpen(true);
@@ -206,32 +214,36 @@ const ManageSpots = () => {
       description: "",
       location: "",
       municipality: "",
+      categories: [],
+      spot_type: [],
       contact_number: "",
       image_url: "",
-      categories: [],
       is_hidden_gem: false,
     });
-    setBarangays([]);
     setEditingSpot(null);
+    setBarangays([]);
     setIsDialogOpen(false);
   };
 
-  const toggleCategory = (category: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      categories: prev.categories.includes(category)
-        ? prev.categories.filter((c) => c !== category)
-        : [...prev.categories, category],
-    }));
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this tourist spot?")) return;
+
+    const { error } = await supabase.from("tourist_spots").delete().eq("id", id);
+    if (error) toast.error("Failed to delete spot");
+    else {
+      toast.success("Spot deleted successfully");
+      fetchSpots();
+    }
   };
 
   return (
     <div>
+      {/* Dialog and Add/Edit Form */}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold">Tourist Spots ({spots.length})</h2>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button onClick={() => resetForm()}>
+            <Button onClick={resetForm}>
               <Plus className="w-4 h-4 mr-2" />
               Add Spot
             </Button>
@@ -239,165 +251,174 @@ const ManageSpots = () => {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{editingSpot ? "Edit" : "Add"} Tourist Spot</DialogTitle>
-              <DialogDescription>
-                Fill in the details for the tourist spot
-              </DialogDescription>
+              <DialogDescription>Fill in the details for the tourist spot</DialogDescription>
             </DialogHeader>
+
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="name">Name *</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                />
-              </div>
+  <div>
+    <Label htmlFor="name">Name *</Label>
+    <Input
+      id="name"
+      value={formData.name}
+      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+      required
+    />
+  </div>
 
-              {/* Municipality/City Dropdown */}
-              <div>
-                <Label>Municipality or City *</Label>
-                <Select
-                  onValueChange={handleMunicipalityChange}
-                  value={
-                    municipalities.find((m) => m.name === formData.municipality)?.code || ""
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select municipality or city" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {municipalities.map((m) => (
-                      <SelectItem key={m.code} value={m.code}>
-                        {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+  {/* Municipality & Barangay */}
+  <div>
+    <Label>Municipality or City *</Label>
+    <Select
+      onValueChange={handleMunicipalityChange}
+      value={municipalities.find((m) => m.name === formData.municipality)?.code || ""}
+    >
+      <SelectTrigger>
+        <SelectValue placeholder="Select municipality or city" />
+      </SelectTrigger>
+      <SelectContent>
+        {municipalities.map((m) => (
+          <SelectItem key={m.code} value={m.code}>
+            {m.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
 
-              {/* Barangay (Location) Dropdown */}
-              <div>
-                <Label>Location (Barangay) *</Label>
-                <Select
-                  onValueChange={(code) => {
-                    const barangay = barangays.find((b) => b.code === code);
-                    setFormData((prev) => ({ ...prev, location: barangay?.name || "" }));
-                  }}
-                  value={
-                    barangays.find((b) => b.name === formData.location)?.code || ""
-                  }
-                  disabled={!barangays.length}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        barangays.length
-                          ? "Select a barangay"
-                          : "Select municipality first"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {barangays.map((b) => (
-                      <SelectItem key={b.code} value={b.code}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+  <div>
+    <Label>Location (Barangay) *</Label>
+    <Select
+      onValueChange={(code) => {
+        const barangay = barangays.find((b) => b.code === code);
+        setFormData((prev) => ({ ...prev, location: barangay?.name || "" }));
+      }}
+      value={barangays.find((b) => b.name === formData.location)?.code || ""}
+      disabled={!barangays.length}
+    >
+      <SelectTrigger>
+        <SelectValue
+          placeholder={
+            barangays.length ? "Select a barangay" : "Select municipality first"
+          }
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {barangays.map((b) => (
+          <SelectItem key={b.code} value={b.code}>
+            {b.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
 
-              <div>
-                <Label>Description</Label>
-                <Textarea
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData({ ...formData, description: e.target.value })
-                  }
-                  rows={3}
-                />
-              </div>
+  {/* Description & Contact */}
+  <div>
+    <Label>Description</Label>
+    <Textarea
+      value={formData.description}
+      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+      rows={3}
+    />
+  </div>
 
-              <div>
-                <Label>Contact Number</Label>
-                <Input
-                  value={formData.contact_number}
-                  onChange={(e) =>
-                    setFormData({ ...formData, contact_number: e.target.value })
-                  }
-                />
-              </div>
+  <div>
+    <Label>Contact Number</Label>
+    <Input
+      value={formData.contact_number}
+      onChange={(e) => setFormData({ ...formData, contact_number: e.target.value })}
+    />
+  </div>
 
-              <div>
-                <Label>Image URL</Label>
-                <Input
-                  value={formData.image_url}
-                  onChange={(e) =>
-                    setFormData({ ...formData, image_url: e.target.value })
-                  }
-                  placeholder="https://..."
-                />
-              </div>
+  {/* Image URL */}
+  <div>
+    <Label>Image URL</Label>
+    <Input
+      value={formData.image_url}
+      onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+      placeholder="https://..."
+    />
+  </div>
 
-              <div>
-                <Label className="mb-3 block">Categories *</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  {availableCategories.map((category) => (
-                    <div
-                      key={category}
-                      className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted"
-                    >
-                      <Checkbox
-                        checked={formData.categories.includes(category)}
-                        onCheckedChange={() => toggleCategory(category)}
-                      />
-                      <label className="cursor-pointer select-none">{category}</label>
-                    </div>
-                  ))}
-                </div>
-              </div>
+  {/* Categories */}
+  <div>
+    <Label className="mb-3 block">Categories *</Label>
+    <div className="grid grid-cols-2 gap-3">
+      {availableCategories.map((category) => (
+        <div
+          key={category}
+          className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-muted"
+        >
+          <Checkbox
+            checked={formData.categories.includes(category)}
+            onCheckedChange={() => toggleCategory(category)}
+          />
+          <label className="cursor-pointer select-none">{category}</label>
+        </div>
+      ))}
+    </div>
+  </div>
 
-              <div className="flex items-center space-x-2 p-4 border-2 border-primary/50 rounded-lg bg-primary/5">
-                <Checkbox
-                  checked={formData.is_hidden_gem}
-                  onCheckedChange={(checked) =>
-                    setFormData({ ...formData, is_hidden_gem: !!checked })
-                  }
-                />
-                <div>
-                  <label className="cursor-pointer select-none font-medium">
-                    💎 Mark as Hidden Gem
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    Featured on homepage as a special discovery
-                  </p>
-                </div>
-              </div>
+  {/* Spot Type Dropdown */}
+  <div>
+    <Label className="mb-3 block">Spot Type</Label>
+    <Select onValueChange={(value) => toggleSpotType(value)} value="">
+      <SelectTrigger>
+        <SelectValue
+          placeholder={
+            formData.spot_type.length > 0
+              ? formData.spot_type.join(", ")
+              : "Select spot types"
+          }
+        />
+      </SelectTrigger>
+      <SelectContent>
+        {availableSpotTypes.map((type) => (
+          <SelectItem key={type} value={type}>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" checked={formData.spot_type.includes(type)} readOnly />
+              <span>{type}</span>
+            </div>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
 
-              <div className="flex gap-3 pt-4">
-                <Button
-                  type="submit"
-                  disabled={isLoading || formData.categories.length === 0}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    <>{editingSpot ? "Update" : "Add"} Spot</>
-                  )}
-                </Button>
-                <Button type="button" variant="outline" onClick={resetForm}>
-                  Cancel
-                </Button>
-              </div>
-            </form>
+  {/* Hidden Gem */}
+  <div className="flex items-center space-x-2 p-4 border-2 border-primary/50 rounded-lg bg-primary/5">
+    <Checkbox
+      checked={formData.is_hidden_gem}
+      onCheckedChange={(checked) => setFormData({ ...formData, is_hidden_gem: !!checked })}
+    />
+    <div>
+      <label className="cursor-pointer select-none font-medium">💎 Mark as Hidden Gem</label>
+      <p className="text-xs text-muted-foreground">Featured on homepage as a special discovery</p>
+    </div>
+  </div>
+
+  <div className="flex gap-3 pt-4">
+    <Button type="submit" disabled={isLoading || formData.categories.length === 0}>
+      {isLoading ? (
+        <>
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+          Saving...
+        </>
+      ) : (
+        <>{editingSpot ? "Update" : "Add"} Spot</>
+      )}
+    </Button>
+    <Button type="button" variant="outline" onClick={resetForm}>
+      Cancel
+    </Button>
+  </div>
+</form>
+
           </DialogContent>
         </Dialog>
       </div>
 
+      {/* Spot List */}
       <div className="grid gap-4">
         {spots.map((spot) => (
           <Card key={spot.id}>
@@ -410,15 +431,16 @@ const ManageSpots = () => {
                     {spot.location}, {spot.municipality}
                   </div>
                   {spot.description && (
-                    <p className="text-sm text-muted-foreground mb-2">
-                      {spot.description}
-                    </p>
+                    <p className="text-sm text-muted-foreground mb-2">{spot.description}</p>
                   )}
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mb-1">
                     {spot.category.map((cat) => (
-                      <Badge key={cat} variant="secondary">
-                        {cat}
-                      </Badge>
+                      <Badge key={cat} variant="secondary">{cat}</Badge>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {spot.spot_type.map((type) => (
+                      <Badge key={type} variant="outline">{type}</Badge>
                     ))}
                   </div>
                 </div>
@@ -426,11 +448,7 @@ const ManageSpots = () => {
                   <Button variant="ghost" size="icon" onClick={() => handleEdit(spot)}>
                     <Pencil className="w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(spot.id)}
-                  >
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(spot.id)}>
                     <Trash2 className="w-4 h-4 text-destructive" />
                   </Button>
                 </div>
