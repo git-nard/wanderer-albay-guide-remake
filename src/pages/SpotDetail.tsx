@@ -24,6 +24,15 @@ interface TouristSpot {
   longitude: number | null;
 }
 
+interface Review {
+  id: string;
+  rating: number;
+  comment: string | null;
+  created_at: string;
+  user_id: string;
+  user_name: string;
+}
+
 const SpotDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [spot, setSpot] = useState<TouristSpot | null>(null);
@@ -76,6 +85,50 @@ const SpotDetail = () => {
     };
     return colors[category] || "bg-muted";
   };
+
+  const [reviews, setReviews] = useState<Review[]>([]);
+const [isReviewsLoading, setIsReviewsLoading] = useState(true);
+const [userHasReviewed, setUserHasReviewed] = useState(false);
+
+useEffect(() => {
+  if (!spot) return;
+  fetchReviews();
+}, [spot, reviewRefreshTrigger]);
+
+const fetchReviews = async () => {
+  setIsReviewsLoading(true);
+
+  const { data: reviewsData, error } = await supabase
+    .from("reviews")
+    .select("*")
+    .eq("spot_id", spot.id)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching reviews:", error);
+    setIsReviewsLoading(false);
+    return;
+  }
+
+  const enrichedReviews: Review[] = [];
+  for (const review of reviewsData || []) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", review.user_id)
+      .single();
+
+    enrichedReviews.push({
+      ...review,
+      user_name: profile?.full_name || "Anonymous",
+    });
+  }
+
+  setReviews(enrichedReviews);
+  setUserHasReviewed(enrichedReviews.some(r => r.user_id === session?.user?.id));
+  setIsReviewsLoading(false);
+};
+
 
   if (isLoading) {
     return (
@@ -182,9 +235,13 @@ const SpotDetail = () => {
                   </TabsList>
                   <TabsContent value="reviews" className="mt-6">
                     <ReviewList
-                      spotId={spot.id}
-                      currentUserId={session?.user?.id || null}
-                      refreshTrigger={reviewRefreshTrigger}
+                      {...({
+                        spotId: spot.id,
+                        currentUserId: session?.user?.id || null,
+                        refreshTrigger: reviewRefreshTrigger,
+                        reviews,
+                        fetchReviews,
+                      } as any)}
                     />
                   </TabsContent>
                   <TabsContent value="write" className="mt-6">
@@ -195,6 +252,7 @@ const SpotDetail = () => {
                         onReviewSubmitted={() => {
                           setReviewRefreshTrigger((prev) => prev + 1);
                         }}
+                        hasUserReviewed={userHasReviewed}
                       />
                     )}
                   </TabsContent>

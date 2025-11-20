@@ -15,53 +15,19 @@ interface Review {
 }
 
 interface ReviewListProps {
-  spotId: string;
   currentUserId: string | null;
-  refreshTrigger: number;
+  reviews: Review[];
+  isLoading: boolean;
+  fetchReviews: () => void;
 }
 
-export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewListProps) => {
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+export const ReviewList = ({
+  currentUserId,
+  reviews,
+  isLoading,
+  fetchReviews,
+}: ReviewListProps) => {
   const { toast } = useToast();
-
-  useEffect(() => {
-    fetchReviews();
-  }, [spotId, refreshTrigger]);
-
-  const fetchReviews = async () => {
-    setIsLoading(true);
-
-    const { data: reviewsData, error } = await supabase
-      .from("reviews")
-      .select("*")
-      .eq("spot_id", spotId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error fetching reviews:", error);
-      setIsLoading(false);
-      return;
-    }
-
-    // Fetch user names
-    const enrichedReviews: Review[] = [];
-    for (const review of reviewsData || []) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", review.user_id)
-        .single();
-
-      enrichedReviews.push({
-        ...review,
-        user_name: profile?.full_name || "Anonymous",
-      });
-    }
-
-    setReviews(enrichedReviews);
-    setIsLoading(false);
-  };
 
   const handleDeleteReview = async (reviewId: string) => {
     const { error } = await supabase.from("reviews").delete().eq("id", reviewId);
@@ -77,7 +43,7 @@ export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewList
         title: "Success",
         description: "Review deleted successfully",
       });
-      fetchReviews();
+      fetchReviews(); // Refresh reviews after deletion
     }
   };
 
@@ -89,7 +55,7 @@ export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewList
     );
   }
 
-  if (reviews.length === 0) {
+  if (!reviews || reviews.length === 0) {
     return (
       <p className="text-center text-muted-foreground py-8">
         No reviews yet. Be the first to review!
@@ -97,10 +63,12 @@ export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewList
     );
   }
 
-  const averageRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+  const averageRating =
+    reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
 
   return (
     <div className="space-y-4">
+      {/* Average Rating */}
       <div className="flex items-center gap-2 mb-4">
         <div className="flex items-center gap-1">
           <Star className="w-5 h-5 fill-yellow-400 text-yellow-400" />
@@ -111,6 +79,7 @@ export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewList
         </span>
       </div>
 
+      {/* Review Cards */}
       {reviews.map((review) => (
         <Card key={review.id}>
           <CardHeader>
@@ -135,6 +104,7 @@ export const ReviewList = ({ spotId, currentUserId, refreshTrigger }: ReviewList
                   {new Date(review.created_at).toLocaleDateString()}
                 </p>
               </div>
+
               {currentUserId === review.user_id && (
                 <Button
                   variant="ghost"

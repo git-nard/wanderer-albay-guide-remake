@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,7 +8,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { MapPin, Search, Star, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 import { Session } from "@supabase/supabase-js";
 import AccommodationsSection from "@/components/AccommodationsSection";
 
@@ -35,14 +34,14 @@ const Explore = () => {
   const [spots, setSpots] = useState<TouristSpot[]>([]);
   const [filteredSpots, setFilteredSpots] = useState<TouristSpot[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]); // MULTI CATEGORY
   const [session, setSession] = useState<Session | null>(null);
   const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
 
   useEffect(() => {
     fetchSpots();
     fetchSubcategories();
-    
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
@@ -53,57 +52,47 @@ const Explore = () => {
       setSession(session);
     });
 
-    // Set up real-time subscription for subcategories
-    const subcategoriesChannel = supabase
-      .channel('subcategories-changes')
+    const subcatChannel = supabase
+      .channel("subcategories-updates")
       .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'subcategories'
-        },
-        () => {
-          fetchSubcategories();
-        }
+        "postgres_changes",
+        { event: "*", schema: "public", table: "subcategories" },
+        fetchSubcategories
       )
       .subscribe();
 
     return () => {
       subscription.unsubscribe();
-      supabase.removeChannel(subcategoriesChannel);
+      supabase.removeChannel(subcatChannel);
     };
   }, []);
 
   useEffect(() => {
     filterSpots();
-  }, [searchQuery, selectedCategory, spots]);
+  }, [searchQuery, selectedCategories, spots]);
 
   const fetchSpots = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("tourist_spots")
       .select("*")
       .order("name");
 
-    if (!error && data) {
-      setSpots(data);
-    }
+    if (data) setSpots(data);
   };
 
   const fetchSubcategories = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("subcategories")
       .select("*")
       .order("name");
 
-    if (!error && data) {
-      setSubcategories(data);
-    }
+    if (data) setSubcategories(data);
   };
 
   const filterSpots = () => {
     let filtered = spots;
 
+    // Search
     if (searchQuery) {
       filtered = filtered.filter(
         (spot) =>
@@ -112,20 +101,36 @@ const Explore = () => {
       );
     }
 
-    if (selectedCategory) {
-      filtered = filtered.filter((spot) => spot.category.includes(selectedCategory));
+    // MULTI-CATEGORY FILTER (Same logic as first code)
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter((spot) =>
+        selectedCategories.every((cat) => spot.category.includes(cat))
+      );
     }
 
     setFilteredSpots(filtered);
   };
 
-  const categories = ["Nature", "Culture", "Adventure", "Food", "Beach", "Heritage"];
+  // Predefined base categories
+  const baseCategories = ["Nature", "Culture", "Adventure", "Food", "Beach", "Heritage"];
 
-  // Combine predefined categories with subcategories
-  const allCategories = [
-    ...categories,
-    ...subcategories.map(sub => sub.name)
-  ].sort();
+  // Mix with dynamic subcategories
+  const allCategories = [...baseCategories, ...subcategories.map((s) => s.name)].sort();
+
+  const handleCategoryClick = useCallback(
+    (category: string) => {
+      if (selectedCategories.includes(category)) {
+        setSelectedCategories(selectedCategories.filter((cat) => cat !== category));
+      } else {
+        setSelectedCategories([...selectedCategories, category]);
+      }
+    },
+    [selectedCategories]
+  );
+
+  const getCategoryCount = (category: string) => {
+    return spots.filter((spot) => spot.category.includes(category)).length;
+  };
 
   const getCategoryColor = (category: string) => {
     const colors: Record<string, string> = {
@@ -137,10 +142,6 @@ const Explore = () => {
       Heritage: "bg-purple-500 text-white",
     };
     return colors[category] || "bg-muted";
-  };
-
-  const getCategoryCount = (category: string) => {
-    return spots.filter(spot => spot.category.includes(category)).length;
   };
 
   return (
@@ -171,7 +172,7 @@ const Explore = () => {
 
           {/* DESTINATIONS TAB */}
           <TabsContent value="destinations" className="space-y-8">
-            {/* Search and Filters */}
+            {/* Search */}
             <div className="space-y-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -183,20 +184,22 @@ const Explore = () => {
                 />
               </div>
 
+              {/* CATEGORY FILTERS (MULTI SELECT) */}
               <div className="flex flex-wrap gap-2">
                 <Button
-                  variant={selectedCategory === null ? "default" : "outline"}
+                  variant={selectedCategories.length === 0 ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setSelectedCategory(null)}
+                  onClick={() => setSelectedCategories([])}
                 >
                   All ({spots.length})
                 </Button>
+
                 {allCategories.map((category) => (
                   <Button
                     key={category}
-                    variant={selectedCategory === category ? "default" : "outline"}
+                    variant={selectedCategories.includes(category) ? "default" : "outline"}
                     size="sm"
-                    onClick={() => setSelectedCategory(category)}
+                    onClick={() => handleCategoryClick(category)}
                   >
                     {category} ({getCategoryCount(category)})
                   </Button>
@@ -204,13 +207,13 @@ const Explore = () => {
               </div>
             </div>
 
-            {/* Spots Grid */}
+            {/* SPOTS GRID */}
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredSpots.length > 0 ? (
                 filteredSpots.map((spot) => (
                   <Card
                     key={spot.id}
-                    className="overflow-hidden hover:shadow-xl transition-all hover:scale-105 cursor-pointer relative group"
+                    className="overflow-hidden hover:shadow-xl transition-all hover:scale-105 cursor-pointer"
                     onClick={() => navigate(`/spot/${spot.id}`)}
                   >
                     {spot.image_url && (
@@ -222,6 +225,7 @@ const Explore = () => {
                         />
                       </div>
                     )}
+
                     <CardHeader>
                       <CardTitle className="flex items-start justify-between gap-2">
                         <span className="line-clamp-2">{spot.name}</span>
@@ -233,19 +237,26 @@ const Explore = () => {
                         )}
                       </CardTitle>
                     </CardHeader>
+
                     <CardContent>
                       {spot.description && (
                         <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                           {spot.description}
                         </p>
                       )}
+
                       <div className="flex items-center gap-1 text-sm text-muted-foreground mb-3">
                         <MapPin className="w-4 h-4" />
                         <span className="line-clamp-1">{spot.location}</span>
                       </div>
+
                       <div className="flex flex-wrap gap-2">
                         {spot.category.map((cat) => (
-                          <Badge key={cat} className={getCategoryColor(cat)} variant="secondary">
+                          <Badge
+                            key={cat}
+                            className={getCategoryColor(cat)}
+                            variant="secondary"
+                          >
                             {cat}
                           </Badge>
                         ))}
@@ -254,8 +265,8 @@ const Explore = () => {
                   </Card>
                 ))
               ) : (
-                <div className="col-span-full text-center py-12">
-                  <p className="text-lg text-muted-foreground">No destinations found</p>
+                <div className="col-span-full text-center py-12 text-lg text-muted-foreground">
+                  No destinations found
                 </div>
               )}
             </div>

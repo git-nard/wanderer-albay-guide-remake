@@ -9,9 +9,10 @@ interface ReviewFormProps {
   spotId: string;
   userId: string;
   onReviewSubmitted: () => void;
+  hasUserReviewed: boolean;
 }
 
-export const ReviewForm = ({ spotId, userId, onReviewSubmitted }: ReviewFormProps) => {
+export const ReviewForm = ({ spotId, userId, onReviewSubmitted, hasUserReviewed }: ReviewFormProps) => {
   const [rating, setRating] = useState(0);
   const [hoveredRating, setHoveredRating] = useState(0);
   const [comment, setComment] = useState("");
@@ -57,6 +58,8 @@ export const ReviewForm = ({ spotId, userId, onReviewSubmitted }: ReviewFormProp
 
     setIsSubmitting(false);
   };
+  
+
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -98,9 +101,17 @@ export const ReviewForm = ({ spotId, userId, onReviewSubmitted }: ReviewFormProp
         </p>
       </div>
 
-      <Button type="submit" disabled={isSubmitting || rating === 0}>
-        {isSubmitting ? "Submitting..." : "Submit Review"}
-      </Button>
+      <Button
+  type="submit"
+  disabled={isSubmitting || rating === 0 || hasUserReviewed}
+>
+  {hasUserReviewed
+    ? "Already Reviewed"
+    : isSubmitting
+    ? "Submitting..."
+    : "Submit Review"}
+</Button>
+
     </form>
   );
 };
